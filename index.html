@@ -538,15 +538,23 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
   function through(f, canvas) { lctx.save(); lctx.globalCompositeOperation = 'source-in'; lctx.drawImage(canvas, f.bx, f.by, f.bw, f.bh); lctx.restore(); }
   const eyePoly = e => e.upper.concat(e.lower.slice(1, -1));
 
-  function skinMask(pts, s, noseOut) {
+  // The face mesh stops below the hairline, so the top of the oval is pushed up to cover the whole forehead.
+  const FOREHEAD = { 10: 0.16, 338: 0.15, 109: 0.15, 297: 0.12, 67: 0.12, 332: 0.08, 103: 0.08, 284: 0.03, 54: 0.03 };
+  function ovalUp(pts) {
+    const ux = pts[10][0] - pts[152][0], uy = pts[10][1] - pts[152][1];
+    return OVAL.map(i => FOREHEAD[i] ? [pts[i][0] + ux * FOREHEAD[i], pts[i][1] + uy * FOREHEAD[i]] : pts[i]);
+  }
+  function skinMask(pts, s, f) {
     clearLayer();
-    softShape('#000', s * 0.05, 'source-over', c => { smoothPath(c, pick(pts, OVAL), true); c.fill(); });
+    softShape('#000', s * 0.05, 'source-over', c => { smoothPath(c, ovalUp(pts), true); c.fill(); });
     EYES.forEach(e => {
       softShape('#000', s * 0.025, 'destination-out', c => { smoothPath(c, pick(pts, eyePoly(e)), true); c.fill(); c.lineWidth = s * 0.03; c.stroke(); });
       softShape('#000', s * 0.03, 'destination-out', c => { smoothPath(c, pick(pts, e.brow), true); c.fill(); });
     });
     softShape('#000', s * 0.02, 'destination-out', c => { smoothPath(c, pick(pts, LIPS_OUT), true); c.fill(); });
     softShape('#000', s * 0.02, 'destination-out', c => { smoothPath(c, pick(pts, NOSE_BASE), true); c.fill(); c.lineWidth = s * 0.05; c.lineJoin = 'round'; c.stroke(); });
+    // keep only what looks like skin: hair over the forehead, a fringe or glasses frames drop out
+    if (f && f.like) { lctx.save(); lctx.globalCompositeOperation = 'destination-in'; lctx.drawImage(f.like, f.bx, f.by, f.bw, f.bh); lctx.restore(); }
   }
 
   // ----- retouch -----
@@ -582,19 +590,19 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
     });
   }
   function drawSmooth(f, amt) {
-    skinMask(f.pts, f.s); through(f, f.soft);
+    skinMask(f.pts, f.s, f); through(f, f.soft);
     stamp('source-over', amt);
   }
   function drawTone(f, amt) {
-    skinMask(f.pts, f.s); tint(hex(f.skin));
+    skinMask(f.pts, f.s, f); tint(hex(f.skin));
     stamp('color', amt * 0.55);
   }
   function drawShine(f, amt) {
-    skinMask(f.pts, f.s); tint(hex(f.skin.map(v => v * 1.24 + 10)));
+    skinMask(f.pts, f.s, f); tint(hex(f.skin.map(v => v * 1.24 + 10)));
     stamp('darken', amt * 0.6);
   }
   function drawGlow(f, amt) {
-    skinMask(f.pts, f.s); through(f, f.soft);
+    skinMask(f.pts, f.s, f); through(f, f.soft);
     stamp('soft-light', amt * 0.4); stamp('screen', amt * 0.12);
   }
   function drawEyes(f, amt) {
@@ -824,7 +832,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
     const pts = lm.map(p => [p.x * W, p.y * H]);
     let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
     pts.forEach(p => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });
-    const px = (x1 - x0) * 0.18, py = (y1 - y0) * 0.18;
+    const px = (x1 - x0) * 0.18, py = (y1 - y0) * 0.24;
     const bx = Math.max(0, Math.floor(x0 - px)), by = Math.max(0, Math.floor(y0 - py));
     const bw = Math.min(W, Math.ceil(x1 + px)) - bx, bh = Math.min(H, Math.ceil(y1 + py)) - by;
     const k = Math.min(1, 720 / Math.max(bw, bh));
@@ -837,9 +845,38 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
     const tmp = document.createElement('canvas'); tmp.width = tw; tmp.height = th;
     const t = tmp.getContext('2d', { willReadFrequently: true });
     t.imageSmoothingQuality = 'high';
+    // which pixels look like this person's skin: colour close to the cheeks and forehead, and not much darker
+    if (!f.like) {
+      t.drawImage(src, bx, by, bw, bh, 0, 0, tw, th);
+      const q = t.getImageData(0, 0, tw, th).data;
+      let r0 = 0, g0 = 0, b0 = 0, cnt = 0;
+      [50, 280, 205, 425, 151].forEach(li => {
+        const x = Math.round((f.pts[li][0] - bx) * k), y = Math.round((f.pts[li][1] - by) * k), rr = Math.max(1, Math.round(f.s * k * 0.02));
+        for (let yy = y - rr; yy <= y + rr; yy++) for (let xx = x - rr; xx <= x + rr; xx++) {
+          if (xx < 0 || yy < 0 || xx >= tw || yy >= th) continue;
+          const i = (yy * tw + xx) * 4; r0 += q[i]; g0 += q[i + 1]; b0 += q[i + 2]; cnt++;
+        }
+      });
+      const likeRaw = new Float32Array(n);
+      if (cnt) {
+        const sum0 = r0 + g0 + b0 + 1, rn0 = r0 / sum0, gn0 = g0 / sum0, L0 = sum0 / cnt;
+        for (let i = 0; i < n; i++) {
+          const sum = q[i * 4] + q[i * 4 + 1] + q[i * 4 + 2] + 1;
+          const dc = Math.hypot(q[i * 4] / sum - rn0, q[i * 4 + 1] / sum - gn0);
+          likeRaw[i] = clamp01(1 - (dc - 0.04) / 0.04) * clamp01((sum / L0 - 0.38) / 0.2);
+        }
+      } else likeRaw.fill(1);
+      // judged over a neighbourhood, so a pimple or a mole inside the skin does not fall out of the mask
+      const likeS = boxMean(likeRaw, tw, th, Math.max(2, Math.round(f.s * k * 0.02)));
+      const lk = new ImageData(tw, th);
+      for (let i = 0; i < n; i++) lk.data[i * 4 + 3] = clamp01((likeS[i] - 0.35) / 0.3) * 255;
+      f.like = document.createElement('canvas'); f.like.width = tw; f.like.height = th;
+      f.like.getContext('2d').putImageData(lk, 0, 0);
+      t.clearRect(0, 0, tw, th);
+    }
     // skin area where automatic spot removal may act
     if (!f.skinA) {
-      skinMask(f.pts, f.s, true);
+      skinMask(f.pts, f.s, f);
       t.drawImage(layer, bx, by, bw, bh, 0, 0, tw, th);
       const md = t.getImageData(0, 0, tw, th).data;
       f.skinA = new Float32Array(n);
