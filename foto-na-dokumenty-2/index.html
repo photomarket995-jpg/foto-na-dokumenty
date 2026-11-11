@@ -90,6 +90,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .seg button{border:0;background:transparent;padding:6px 12px;font-size:14px;cursor:pointer;display:flex;align-items:center;gap:6px}
 .seg button+button{border-left:1px solid var(--line)}
 .seg button[aria-pressed=true]{background:var(--ink);color:var(--surface)}
+.seg button{justify-content:center}
 .sw{width:12px;height:12px;border-radius:50%;border:1px solid #9aa4b2;display:inline-block}
 .check{display:flex;gap:8px;align-items:center;font-size:14px;cursor:pointer}
 
@@ -169,6 +170,48 @@ dialog{border:1px solid var(--line);border-radius:12px;background:var(--surface)
 dialog::backdrop{background:rgba(8,12,20,.55)}
 dialog h3{margin:0 0 8px;font:700 20px/1.2 var(--display)}
 dialog p{margin:0 0 16px;color:var(--muted)}
+.pane{display:grid;gap:12px}
+.seg.panes{display:grid;grid-template-columns:repeat(3,1fr)}
+.seg.panes button{justify-content:center;min-height:38px;font-weight:500}
+.bar{display:none}
+/* phones and narrow windows: the photo stays pinned while the settings scroll under it */
+@media (max-width:860px){
+  .wrap{padding:0 16px}
+  header.top{padding:12px 0}
+  .proto{font-size:11.5px;padding:2px 8px;white-space:normal;text-align:center}
+  .intro{padding:4px 0 16px}
+  .intro p{font-size:15px}
+  .work{gap:14px}
+  .stage{display:contents}
+  .table{min-height:0;padding:16px 12px 10px;border:1px solid var(--line)}
+  .upload,.controls{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+  body.has-photo .table{position:sticky;top:0;z-index:4;margin:0 -16px;border-radius:0;border-width:0 0 1px;padding:10px 12px;box-shadow:0 10px 18px -12px rgba(15,27,45,.45)}
+  body.has-photo #view{max-height:38vh}
+  body.has-photo .dims,body.has-photo .timing{display:none}
+  .sec{padding:16px}
+  .files{margin-top:20px}
+  .grid{grid-template-columns:1fr 1fr}
+  body.has-photo{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+  .bar:not([hidden]){display:flex;position:fixed;left:0;right:0;bottom:0;z-index:5;align-items:center;justify-content:space-between;gap:12px;
+    padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -8px 20px -12px rgba(15,27,45,.4)}
+  .barinfo{display:grid;line-height:1.2;min-width:0}
+  .barinfo b{font:700 19px/1.1 var(--display)}
+  .barinfo span{font-size:12px;color:var(--muted)}
+  .bar .btn{min-height:46px;padding:0 16px;flex:none}
+  body.has-photo .toast{bottom:calc(86px + env(safe-area-inset-bottom))}
+}
+/* fingers need larger targets than a mouse */
+@media (pointer:coarse){
+  #view{touch-action:pan-y}
+  .btn.small{min-height:40px}
+  .tabs button{min-height:38px;padding:6px 14px}
+  input[type=range]{height:34px}
+  .swatch{width:34px;height:34px}
+  .swatches{gap:9px}
+  .swatches input[type=color]{width:36px;height:36px}
+  .check input{width:20px;height:20px}
+  .doc{min-height:48px}
+}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:10px 16px;border-radius:8px;font-size:14px;max-width:calc(100% - 32px);z-index:5}
 </style>
 </head>
@@ -233,7 +276,7 @@ dialog p{margin:0 0 16px;color:var(--muted)}
         <div class="row">
           <button type="button" class="btn small" id="reset">Вернуть автокадр</button>
           <label class="btn small" for="file">Другое фото</label>
-          <p class="hint">Кадр можно двигать мышью или пальцем.</p>
+          <p class="hint">Кадр можно двигать мышью. На телефоне пользуйтесь ползунками.</p>
         </div>
       </div>
     </section>
@@ -256,29 +299,38 @@ dialog p{margin:0 0 16px;color:var(--muted)}
 
       <section class="card sec">
         <h2><span class="n">2</span>Ретушь</h2>
-        <div class="tabs" id="presets" role="group" aria-label="Наборы ретуши"></div>
-        <div class="rts" id="retouch"></div>
-        <div class="heal">
-          <span class="lbl">Точечная кисть</span>
-          <div class="row">
-            <button type="button" class="btn small" id="healBtn" aria-pressed="false" disabled>Убрать пятно кликом</button>
-            <button type="button" class="btn small" id="healUndo" disabled>Отменить</button>
-          </div>
-          <div class="rt"><label for="brush">Размер кисти</label><output class="mono" id="brushVal">100%</output><input type="range" id="brush" min="50" max="250" value="100"></div>
-          <p class="hint">Включите кисть и кликните по прыщику, пятну или волоску на фото.</p>
+        <div class="seg panes" role="tablist" id="paneTabs">
+          <button type="button" role="tab" data-pane="skin" aria-pressed="true">Кожа</button>
+          <button type="button" role="tab" data-pane="makeup" aria-pressed="false">Макияж</button>
+          <button type="button" role="tab" data-pane="color" aria-pressed="false">Свет и цвет</button>
         </div>
         <div class="row"><button type="button" class="btn small" id="rawBtn" aria-pressed="false" disabled>Сравнить до и после</button></div>
-        <p class="hint" id="retHint"></p>
-        <h3 class="sub">Макияж</h3>
-        <div class="tabs" id="looks" role="group" aria-label="Готовые образы"></div>
-        <div class="products" id="products"></div>
-        <p class="hint">Макияж меняет внешность на снимке. Для паспорта и виз его лучше не включать.</p>
-        <h3 class="sub">Свет и цвет</h3>
-        <div class="rts" id="colors"></div>
-        <div class="row">
-          <button type="button" class="btn small" id="colAuto" disabled>Авто</button>
-          <button type="button" class="btn small" id="colReset" disabled>Сбросить</button>
-          <button type="button" class="btn small" id="bwBtn" aria-pressed="false">Чёрно-белое</button>
+        <div class="pane" data-pane="skin">
+          <div class="tabs" id="presets" role="group" aria-label="Наборы ретуши"></div>
+          <div class="rts" id="retouch"></div>
+          <div class="heal">
+            <span class="lbl">Точечная кисть</span>
+            <div class="row">
+              <button type="button" class="btn small" id="healBtn" aria-pressed="false" disabled>Убрать пятно кликом</button>
+              <button type="button" class="btn small" id="healUndo" disabled>Отменить</button>
+            </div>
+            <div class="rt"><label for="brush">Размер кисти</label><output class="mono" id="brushVal">100%</output><input type="range" id="brush" min="50" max="250" value="100"></div>
+            <p class="hint">Включите кисть и коснитесь прыщика, пятна или волоска на фото.</p>
+          </div>
+          <p class="hint" id="retHint"></p>
+        </div>
+        <div class="pane" data-pane="makeup" hidden>
+          <div class="tabs" id="looks" role="group" aria-label="Готовые образы"></div>
+          <div class="products" id="products"></div>
+          <p class="hint">Макияж меняет внешность на снимке. Для паспорта и виз его лучше не включать.</p>
+        </div>
+        <div class="pane" data-pane="color" hidden>
+          <div class="rts" id="colors"></div>
+          <div class="row">
+            <button type="button" class="btn small" id="colAuto" disabled>Авто</button>
+            <button type="button" class="btn small" id="colReset" disabled>Сбросить</button>
+            <button type="button" class="btn small" id="bwBtn" aria-pressed="false">Чёрно-белое</button>
+          </div>
         </div>
       </section>
 
@@ -324,6 +376,10 @@ dialog p{margin:0 0 16px;color:var(--muted)}
     <button type="button" class="btn" id="payClose">Отмена</button>
   </div>
 </dialog>
+<div class="bar" id="bar" hidden>
+  <div class="barinfo"><b class="mono" id="barPrice">499 ₽</b><span id="barNote">один снимок, любые размеры</span></div>
+  <button type="button" class="btn primary" id="barBtn">Убрать «образец»</button>
+</div>
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script src="vendor/fd/face_detection.js"></script>
@@ -355,6 +411,7 @@ const BONUS = ['pasport','gosuslugi','3x4','25x35','4x6'];
 const BONUS_NAME = {pasport:'Паспорт и загранпаспорт', gosuslugi:'Для Госуслуг'};
 const byId = id => DOCS.find(d => d.id === id);
 
+const MOBILE = matchMedia('(pointer:coarse)').matches && Math.min(screen.width, screen.height) < 820;   // lighter settings for phones
 const S = { doc: byId('pasport'), tab:'rf', photo:null, z:1, fx:0, fy:0, bg:'#ffffff', guides:true, paid:false, split:false, splitPos:0.5, heal:false, vt:null, bw:false, col:{exp:0, con:0, warm:0, sat:0}, edgeCut:0, edgeSoft:50, level:true, src:null };
 
 /* ---------- drawing ---------- */
@@ -572,13 +629,13 @@ function toTensor(canvas){
 }
 async function matte(work){
   const sess = await withTimeout(mattingSession(), 120000);
-  const MW = 1040, MH = 1280, SW = 416, SH = 512;      // small = big * 0.4, the size the model thinks at
+  const SW = 416, SH = 512, RATIO = MOBILE ? 0.5 : 0.4, MW = SW/RATIO, MH = SH/RATIO;   // small is the size the model thinks at
   const zero = () => new ort.Tensor('float32', new Float32Array(1), [1, 1, 1, 1]);
   let rec = [zero(), zero(), zero(), zero()];
   const run = (src, ratio) => sess.run({src, r1i:rec[0], r2i:rec[1], r3i:rec[2], r4i:rec[3], downsample_ratio:new ort.Tensor('float32', new Float32Array([ratio]), [1])});
   const small = toTensor(scaled(work, SW, SH));
   for (let i = 0; i < 2; i++){ const o = await run(small, 1); rec = [o.r1o, o.r2o, o.r3o, o.r4o]; await paint(); }
-  const o = await run(toTensor(scaled(work, MW, MH)), 0.4);
+  const o = await run(toTensor(scaled(work, MW, MH)), RATIO);
   const f = o.fgr.data, a = o.pha.data, n = MW*MH, img = new ImageData(MW, MH), p = img.data;
   for (let i = 0; i < n; i++){ p[i*4] = f[i]*255; p[i*4+1] = f[n+i]*255; p[i*4+2] = f[2*n+i]*255; p[i*4+3] = a[i]*255; }
   const c = document.createElement('canvas'); c.width = MW; c.height = MH; c.getContext('2d').putImageData(img, 0, 0);
@@ -1337,7 +1394,7 @@ async function analyze(src){
     eye = {x:src.width/2, y:src.height*0.4}; d = Math.min(src.width, src.height)*0.1; ang = 0;
   }
   // work area in units of d: crown = eye-2d, chin = eye+1.9d
-  const headSrc = 3.9*d, ws = Math.min(1, 720/headSrc);
+  const headSrc = 3.9*d, ws = Math.min(1, (MOBILE ? 560 : 720)/headSrc);
   const Ww = Math.round(9.88*d*ws), Hw = Math.round(12.16*d*ws), eyeY = 5.04*d*ws;
   const work = document.createElement('canvas'); work.width = Ww; work.height = Hw;
   const wx = work.getContext('2d', {willReadFrequently:true});
@@ -1473,6 +1530,10 @@ function update(light){
   const edgeOn = !!(S.photo && S.photo.md) && S.bg !== 'orig'; $('edgeCut').disabled = $('edgeSoft').disabled = !edgeOn;
   renderChecks(info);
   $('pay').disabled = !S.photo; $('pay').hidden = S.paid;
+  document.body.classList.toggle('has-photo', !!S.photo);
+  $('bar').hidden = !S.photo;
+  $('barPrice').textContent = S.paid ? 'Оплачено' : PRICE + ' ₽'; $('barNote').textContent = S.paid ? 'любой размер этого снимка' : 'один снимок, любые размеры';
+  $('barBtn').textContent = S.paid ? 'Сохранить лист 10×15' : 'Убрать «образец»';
   $('mainDl').hidden = !(S.paid && S.photo); $('resetPaidRow').hidden = !(S.paid && S.photo); $('dlZip').hidden = !(S.paid && S.photo);
   $('payHint').textContent = S.paid ? 'Этот снимок оплачен. Выбирайте любой документ или размер и сохраняйте, доплачивать не нужно.' : 'Предпросмотр бесплатный, с надписью «образец». Одна оплата открывает этот снимок во всех размерах.';
   clearTimeout(varT);
@@ -1558,7 +1619,9 @@ view.addEventListener('pointermove', e => {
   if (S.split && !drag) view.style.cursor = nearDivider(e) ? 'ew-resize' : ''; else if (!S.split) view.style.cursor = '';
   if (!drag) return;
   const r = view.getBoundingClientRect(), headCss = S.doc.head/S.doc.w*r.width;
-  S.fx = drag.fx + (e.clientX-drag.x)/headCss; S.fy = drag.fy + (e.clientY-drag.y)/headCss; update(true);
+  S.fx = drag.fx + (e.clientX-drag.x)/headCss;
+  if (e.pointerType !== 'touch') S.fy = drag.fy + (e.clientY-drag.y)/headCss;   // on touch a vertical swipe scrolls the page; use the slider
+  update(true);
 });
 view.addEventListener('click', e => {
   const p = S.photo, f = p && p.face;
@@ -1578,6 +1641,12 @@ view.tabIndex = 0;
 const dlg = $('payDlg');
 $('pay').addEventListener('click', () => { if (dlg.showModal) dlg.showModal(); else { S.paid = true; update(); } });
 $('payClose').addEventListener('click', () => dlg.close());
+$('barBtn').addEventListener('click', () => { if (S.paid) saveSheet(S.doc); else $('pay').click(); });
+$('paneTabs').addEventListener('click', e => {
+  const t = e.target.closest('[data-pane]'); if (!t) return;
+  for (const b of $('paneTabs').children) b.setAttribute('aria-pressed', String(b === t));
+  document.querySelectorAll('.pane').forEach(p => p.hidden = p.dataset.pane !== t.dataset.pane);
+});
 $('unlock').addEventListener('click', () => { S.paid = true; markPaid(S.photoId); dlg.close(); update(); toast('Снимок открыт во всех размерах.'); });
 $('resetPaid').addEventListener('click', () => { try { localStorage.removeItem(PAID_KEY); } catch (e){} S.paid = false; update(); toast('Оплата сброшена. Надпись «образец» вернулась.'); });
 $('dlPhoto').addEventListener('click', () => savePhoto(S.doc));
@@ -1589,7 +1658,7 @@ window.__app = {heals, analyse, skinMask, layer, applyLook, buildCut, renderReto
   $('varTitle').textContent = `${w} ${n === 1 ? 'вариант' : n < 5 ? 'варианта' : 'вариантов'} из одного снимка`;
   $('priceNote').textContent = 'один раз за снимок, любые размеры'; }
 // Warm the models up in the background, so the first photo does not wait for downloads
-setTimeout(async () => { for (const load of [faceDetector, faceMesh, mattingSession]){ try { await load(); } catch (e){} } }, 1200);
+if (!(navigator.connection && navigator.connection.saveData)) setTimeout(async () => { for (const load of [faceDetector, faceMesh, mattingSession]){ try { await load(); } catch (e){} } }, 1200);
 buildRetouch(); buildMakeup(); buildColors(); renderDocs(); update();
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => update());
 })();
