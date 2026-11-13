@@ -548,13 +548,20 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
     clearLayer();
     softShape('#000', s * 0.05, 'source-over', c => { smoothPath(c, ovalUp(pts), true); c.fill(); });
     EYES.forEach(e => {
-      softShape('#000', s * 0.025, 'destination-out', c => { smoothPath(c, pick(pts, eyePoly(e)), true); c.fill(); c.lineWidth = s * 0.03; c.stroke(); });
+      softShape('#000', s * 0.025, 'destination-out', c => { smoothPath(c, pick(pts, eyePoly(e)), true); c.fill(); c.lineWidth = s * 0.05; c.stroke(); });
       softShape('#000', s * 0.03, 'destination-out', c => { smoothPath(c, pick(pts, e.brow), true); c.fill(); });
     });
     softShape('#000', s * 0.02, 'destination-out', c => { smoothPath(c, pick(pts, LIPS_OUT), true); c.fill(); });
+    keepLashes(f);
     softShape('#000', s * 0.02, 'destination-out', c => { smoothPath(c, pick(pts, NOSE_BASE), true); c.fill(); c.lineWidth = s * 0.05; c.lineJoin = 'round'; c.stroke(); });
     // keep only what looks like skin: hair over the forehead, a fringe or glasses frames drop out
     if (f && f.like) { lctx.save(); lctx.globalCompositeOperation = 'destination-in'; lctx.drawImage(f.like, f.bx, f.by, f.bw, f.bh); lctx.restore(); }
+  }
+
+  // Lashes and other fine dark hairs around the eyes are cut out of every skin effect, so nothing lightens or blurs them.
+  function keepLashes(f) {
+    if (!f || !f.lash) return;
+    lctx.save(); lctx.globalCompositeOperation = 'destination-out'; lctx.drawImage(f.lash, f.bx, f.by, f.bw, f.bh); lctx.restore();
   }
 
   // ----- retouch -----
@@ -573,8 +580,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
     EYES.forEach(e => {
       const a = pick(pts, e.under1), b = pick(pts, e.under3).map((p, i) => lerp(a[i], p, 1.12));
       softShape(color, s * 0.022, 'source-over', c => { smoothPath(c, a.concat(b.reverse()), true); c.fill(); });
-      softShape('#000', s * 0.012, 'destination-out', c => { smoothPath(c, pick(pts, eyePoly(e)), true); c.fill(); c.lineWidth = s * 0.012; c.stroke(); });
+      softShape('#000', s * 0.015, 'destination-out', c => { smoothPath(c, pick(pts, eyePoly(e)), true); c.fill(); c.lineWidth = s * 0.03; c.stroke(); });
     });
+    keepLashes(f);
   }
   function drawUnderEye(f, amt) {
     underMask(f, '#000'); through(f, f.soft);
@@ -584,7 +592,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
       clearLayer();
       const a = pick(pts, e.under1), b = pick(pts, e.under3).map((p, j) => lerp(a[j], p, 1.12));
       softShape(hex(f.cheek[i]), s * 0.024, 'source-over', c => { smoothPath(c, a.concat(b.reverse()), true); c.fill(); });
-      softShape('#000', s * 0.012, 'destination-out', c => { smoothPath(c, pick(pts, eyePoly(e)), true); c.fill(); c.lineWidth = s * 0.012; c.stroke(); });
+      softShape('#000', s * 0.015, 'destination-out', c => { smoothPath(c, pick(pts, eyePoly(e)), true); c.fill(); c.lineWidth = s * 0.03; c.stroke(); });
+      keepLashes(f);
       stamp('lighten', amt * 0.45);
       stamp('color', amt * 0.3);
     });
@@ -897,6 +906,16 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
       for (let i = 0; i < n; i++) f.zoneA[i] = zd[i * 4 + 3] / 255;
       t.clearRect(0, 0, tw, th);
     }
+    // a band around each eye opening where lashes can be
+    if (!f.lashZ) {
+      clearLayer();
+      EYES.forEach(e => softShape('#000', f.s * 0.03, 'source-over', c => { smoothPath(c, pick(f.pts, eyePoly(e)), true); c.fill(); c.lineWidth = f.s * 0.11; c.lineJoin = 'round'; c.stroke(); }));
+      t.drawImage(layer, bx, by, bw, bh, 0, 0, tw, th);
+      const ld = t.getImageData(0, 0, tw, th).data;
+      f.lashZ = new Float32Array(n);
+      for (let i = 0; i < n; i++) f.lashZ[i] = ld[i * 4 + 3] / 255;
+      t.clearRect(0, 0, tw, th);
+    }
     t.drawImage(src, bx, by, bw, bh, 0, 0, tw, th);
     const img = t.getImageData(0, 0, tw, th), d = img.data;
     const faceW = f.s * k;
@@ -921,6 +940,17 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
       const sm = boxMean(raw, tw, th, Math.max(1, Math.round(faceW * 0.012)));
       f.mAuto = new Float32Array(n);
       for (let i = 0; i < n; i++) f.mAuto[i] = clamp01(sm[i] * 5) * f.skinA[i];
+      // lashes: thin marks near the eye that are clearly darker than the skin around them
+      const lashRaw = new Float32Array(n);
+      for (let i = 0; i < n; i++) if (f.lashZ[i] > 0.05) lashRaw[i] = clamp01((bL[i] - L[i] - 12) / 12) * f.lashZ[i];
+      // a lash is a thin line; a wide dark patch is a shadow or a bag under the eye and must stay correctable
+      const lashWide = boxMean(lashRaw, tw, th, Math.max(3, Math.round(faceW * 0.022)));
+      for (let i = 0; i < n; i++) lashRaw[i] *= clamp01(1 - (lashWide[i] - 0.4) / 0.2);
+      const lashS = boxMean(lashRaw, tw, th, Math.max(1, Math.round(faceW * 0.004)));
+      const lashI = new ImageData(tw, th);
+      for (let i = 0; i < n; i++) lashI.data[i * 4 + 3] = clamp01(Math.max(lashRaw[i], lashS[i] * 2.5)) * 255;
+      f.lash = document.createElement('canvas'); f.lash.width = tw; f.lash.height = th;
+      f.lash.getContext('2d').putImageData(lashI, 0, 0);
       // glare: near-white patches much brighter than what surrounds them
       const rawG = new Float32Array(n);
       for (let i = 0; i < n; i++) {
